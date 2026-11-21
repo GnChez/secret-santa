@@ -1,8 +1,4 @@
-import { isSafeImageSrc } from './tokens.js';
-
-export const MAX_IMAGES = 4;
-const MAX_SIDE = 320;
-const QUALITY = 0.6;
+export const MAX_IMAGES = 6;
 
 function escapeAttr(value) {
   return String(value)
@@ -12,44 +8,58 @@ function escapeAttr(value) {
     .replaceAll('"', '&quot;');
 }
 
-// Reduce la foto a una miniatura ligera para que quepa en el enlace.
-export async function fileToThumbnail(file) {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await new Promise((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve(image);
-      image.onerror = reject;
-      image.src = url;
-    });
-    const scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    const webp = canvas.toDataURL('image/webp', QUALITY);
-    return webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/jpeg', QUALITY);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+function isSafeImageSrc(src) {
+  return (
+    typeof src === 'string' &&
+    (/^https?:\/\/\S+$/i.test(src) ||
+      /^\/api\/img\/[A-Za-z0-9-]+$/.test(src) ||
+      /^data:image\/(?:jpeg|webp|png);base64,[A-Za-z0-9+/=]+$/.test(src))
+  );
 }
 
+function loadImage(file) {
+  const url = URL.createObjectURL(file);
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = url;
+  }).finally(() => URL.revokeObjectURL(url));
+}
+
+// Reduce la foto antes de subirla (las del móvil pesan varios MB).
+export async function fileToImageBlob(file, maxSide = 1280, quality = 0.82) {
+  const img = await loadImage(file);
+  const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const toBlob = (type) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+  const webp = await toBlob('image/webp');
+  if (webp && webp.type === 'image/webp') return webp;
+  return toBlob('image/jpeg');
+}
+
+// Acepta imágenes como texto (src) o como objetos { id, src }.
 export function renderImageGrid(images = [], { removable = false } = {}) {
-  const safe = images.filter(isSafeImageSrc);
+  const safe = images
+    .map((item) => (typeof item === 'string' ? { id: item, src: item } : item))
+    .filter((item) => isSafeImageSrc(item?.src));
   if (!safe.length) return '';
   return `
     <div class="wish-images">
       ${safe
-        .map((src, index) => {
-          const isRemote = src.startsWith('http');
+        .map(({ id, src }) => {
+          const canOpen = !src.startsWith('data:');
           const img = `<img class="wish-img" src="${escapeAttr(src)}" alt="Foto de la lista de deseos" loading="lazy" referrerpolicy="no-referrer" data-src="${escapeAttr(src)}" />`;
           return `
             <figure class="wish-image">
-              ${isRemote ? `<a href="${escapeAttr(src)}" target="_blank" rel="noopener noreferrer">${img}</a>` : img}
-              ${removable ? `<button type="button" class="wish-image-remove" data-remove-image="${index}" aria-label="Quitar foto">×</button>` : ''}
+              ${canOpen ? `<a href="${escapeAttr(src)}" target="_blank" rel="noopener noreferrer">${img}</a>` : img}
+              ${removable ? `<button type="button" class="wish-image-remove" data-remove-image="${escapeAttr(id)}" aria-label="Quitar">×</button>` : ''}
             </figure>
           `;
         })

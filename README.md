@@ -1,36 +1,53 @@
 # Amigo invisible familiar
 
-Web sencilla para sortear un amigo invisible en familia, evitando que salgan parejas del mismo hogar.
+Web para sortear un amigo invisible en familia, evitando que salgan parejas del mismo hogar.
+Funciona con un pequeño servidor en Cloudflare (Worker + base de datos D1), gratis para este uso.
 
-## Ejecutar en local
+## Cómo usarlo
+
+**Organizador**
+
+1. Crea el evento, las familias y añade a cada persona.
+2. Pulsa **Compartir** junto a cada persona para enviarle su **enlace personal**. Solo una vez.
+3. Ve en el panel quién ha escrito ya su lista (se actualiza sola, no hay que importar nada).
+4. Pulsa **Sortear nombres**. El sorteo lo hace el servidor: tú tampoco ves quién regala a quién.
+5. Para gestionar el evento desde otro móvil u ordenador, usa **Abrir en otro dispositivo** (copia tu enlace de organizador; no lo compartas).
+
+**Participante**
+
+1. Abre tu enlace personal.
+2. Escribe tu lista de deseos, añade fotos o enlaces de productos. Se guarda en el servidor.
+3. Cuando se haga el sorteo, en ese mismo enlace verás a quién le regalas y su lista, siempre al día.
+
+Si tenías un evento de la versión anterior guardado en el navegador, la página de inicio ofrece
+**Pasar al servidor** (se conserva el sorteo). Los enlaces antiguos de revelación siguen abriéndose.
+
+## Desarrollo en local
 
 ```bash
 npm install
-npm run dev
+npm run dev:api   # API + base de datos local en http://localhost:8787
+npm run dev       # web con recarga en caliente (otra terminal), usa la API anterior
 ```
 
-Abre la URL que aparece en la terminal (normalmente `http://localhost:5173`).
+O todo junto, como en producción: `npm run preview`.
 
-## Cómo usarlo (organizador)
+## Publicar
 
-1. Crea familias y añade a cada persona (solo nombre y familia).
-2. Pulsa **Compartir** junto a cada persona para enviarle su enlace de lista de deseos (abre el menú de compartir del móvil o WhatsApp directamente). También puedes **Copiar**.
-3. Cuando te devuelvan el enlace con la lista, ábrelo en este mismo dispositivo y pulsa **Importar esta lista a mi evento**. O usa **Importar lista desde enlace** (acepta el mensaje entero de WhatsApp y tiene botón de pegar).
-4. Cuando quieras, pulsa **Sortear nombres**.
-5. Pulsa **Compartir** en el **enlace de revelación** de cada persona y envíaselo solo a ella.
+Cada push a `main` despliega automáticamente con GitHub Actions
+(`.github/workflows/deploy-cloudflare.yml`): compila la web, crea la base de datos D1 si no existe,
+aplica las migraciones de `migrations/` y publica el Worker.
 
-## Cómo usarlo (participante)
+Configuración necesaria una sola vez (en GitHub → Settings → Secrets and variables → Actions):
 
-1. Abre el enlace que te mandó el organizador.
-2. Escribe tu lista de deseos. Opcionalmente añade hasta 4 **fotos** (se reducen para caber en el enlace) o **enlaces** de imágenes/productos. Pulsa **Guardar lista**.
-3. Pulsa **Enviar al organizador**.
+- `CLOUDFLARE_API_TOKEN`: token con la plantilla «Edit Cloudflare Workers» + permiso «Account · D1 · Edit».
+- `CLOUDFLARE_ACCOUNT_ID`: el Account ID de tu cuenta de Cloudflare.
 
-> No hay servidor: todo viaja dentro del enlace. Por eso las fotos se guardan como miniaturas (unos 2–5 KB cada una).
+La web queda en `https://amigo-invisible.<tu-subdominio>.workers.dev`.
 
-## Publicar en internet
+## Estructura
 
-```bash
-npm run build
-```
-
-Sube la carpeta `dist` a GitHub Pages, Netlify, Vercel, etc.
+- `src/`: la web (Vite, JavaScript sin framework).
+- `worker/index.js`: la API.
+- `migrations/`: esquema de la base de datos D1.
+- `src/algorithm.js`: el sorteo (lo usa el servidor).

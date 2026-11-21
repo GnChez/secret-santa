@@ -879,8 +879,54 @@ textarea:focus {
   pointer-events: none;
 }
 
-.wishlist-text,
-.wishlist-preview {
+.wishlist-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Versión con servidor */
+.loading {
+  text-align: center;
+  color: var(--muted);
+  margin-top: 4rem;
+}
+
+.event-link {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.reveal-section {
+  display: grid;
+  gap: 0.6rem;
+  text-align: center;
+  margin: 1rem 0 0.5rem;
+  padding: 1rem;
+  border-radius: 14px;
+  background: rgba(232, 184, 74, 0.08);
+  border: 1px solid rgba(232, 184, 74, 0.25);
+}
+
+.reveal-section .wishlist-box {
+  margin-top: 0;
+}
+
+.image-field {
+  margin-top: 1.25rem;
+}
+
+#image-editor.busy {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.family-label {
+  min-width: 0;
 }

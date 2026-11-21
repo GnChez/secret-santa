@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "amigo-invisible",
+  "main": "worker/index.js",
+  "compatibility_date": "2025-09-01",
+  // La web (carpeta dist, generada con `npm run build`) se sirve desde el mismo Worker
+  "assets": {
+    "directory": "./dist"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "amigo-invisible",
+      // El despliegue de GitHub Actions rellena esto automáticamente (scripts/ensure-d1.mjs)
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

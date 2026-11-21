@@ -15,6 +15,15 @@ import {
   encodeWishlistToken,
   extractTokenFromUrl,
 } from './tokens.js';
+import {
+  MAX_IMAGES,
+  copyText,
+  fileToThumbnail,
+  installImageFallback,
+  linkify,
+  renderImageGrid,
+  shareLink,
+} from './media.js';
 
 const FAMILY_COLORS = [
   '#c0392b',
@@ -75,6 +84,19 @@ function familyName(familyId) {
   return event.families.find((f) => f.id === familyId)?.name || 'Desconocida';
 }
 
+function hasWishlist(person) {
+  return Boolean(person.wishlist?.trim() || person.images?.length);
+}
+
+function shareButtons(url, text) {
+  return `
+    <div class="share-actions">
+      <button type="button" class="btn small primary" data-share-link="${encodeURIComponent(url)}" data-share-text="${encodeURIComponent(text)}">Compartir</button>
+      <button type="button" class="btn small btn-copy" data-copy-link="${encodeURIComponent(url)}">Copiar</button>
+    </div>
+  `;
+}
+
 function persist() {
   saveEvent(event);
   render();
@@ -133,7 +155,7 @@ function renderHome() {
 function renderManage() {
   const drawCheck = canDraw(event.participants);
   const isDrawn = Boolean(event.assignment);
-  const wishlistCount = event.participants.filter((p) => p.wishlist?.trim()).length;
+  const wishlistCount = event.participants.filter(hasWishlist).length;
 
   const familyRows = event.families
     .map(
@@ -155,8 +177,8 @@ function renderManage() {
           <strong>${escapeHtml(person.name)}</strong>
           <span class="chip" style="--chip-color: ${familyColor(person.familyId)}">${escapeHtml(familyName(person.familyId))}</span>
           ${
-            person.wishlist
-              ? `<p class="wishlist-preview">${escapeHtml(person.wishlist)}</p>`
+            hasWishlist(person)
+              ? `${person.wishlist ? `<p class="wishlist-preview">${linkify(escapeHtml(person.wishlist))}</p>` : ''}${renderImageGrid(person.images)}`
               : `<p class="wishlist-preview muted">Sin lista de deseos</p>`
           }
         </div>
@@ -175,16 +197,20 @@ function renderManage() {
               participantId: person.id,
               participantName: person.name,
               wishlist: person.wishlist || '',
+              images: person.images,
             });
             const url = buildWishlistUrl(token);
-            const hasList = Boolean(person.wishlist?.trim());
+            const hasList = hasWishlist(person);
+            const message = hasList
+              ? `🎁 ${person.name}, aquí puedes revisar o cambiar tu lista de deseos para «${event.name}»:`
+              : `🎁 ¡Hola ${person.name}! Escribe aquí tu lista de deseos para «${event.name}» (puedes añadir fotos):`;
             return `
           <li class="link-row">
             <div>
               <strong>${escapeHtml(person.name)}</strong>
               <span class="status-badge ${hasList ? 'done' : 'pending'}">${hasList ? 'Lista recibida' : 'Pendiente'}</span>
             </div>
-            <button type="button" class="btn small btn-copy" data-copy-link="${encodeURIComponent(url)}">Copiar enlace</button>
+            ${shareButtons(url, message)}
           </li>
         `;
           })
@@ -201,14 +227,16 @@ function renderManage() {
             giverName: giver.name,
             receiverName: receiver.name,
             wishlist: receiver.wishlist,
+            images: receiver.images,
           });
           const url = buildRevealUrl(token);
+          const message = `🤫 ${giver.name}, abre este enlace para descubrir a quién le haces el regalo en «${event.name}». ¡No se lo enseñes a nadie!`;
           return `
           <li class="link-row">
             <div>
               <strong>${escapeHtml(giver.name)}</strong>
             </div>
-            <button type="button" class="btn small btn-copy" data-copy-link="${encodeURIComponent(url)}">Copiar enlace</button>
+            ${shareButtons(url, message)}
           </li>
         `;
         })
@@ -268,7 +296,7 @@ function renderManage() {
             ${
               isDrawn
                 ? `Se pueden actualizar <strong>después del sorteo</strong>. Si alguien cambia la suya, importa el enlace nuevo y vuelve a copiar y reenviar <strong>todos</strong> los enlaces de revelación (así cada regalador recibe la lista actualizada sin que veas el sorteo).`
-                : `Envía a cada persona su enlace. Ellos escriben qué les gustaría recibir y te devuelven el enlace por WhatsApp. Pulsa «Importar lista» para guardarla aquí.`
+                : `Pulsa «Compartir» para enviar a cada persona su enlace (por WhatsApp o lo que uséis). Escriben su lista, pueden añadir fotos, y te devuelven el enlace. Si lo abres en este mismo dispositivo se importa con un toque; si no, usa «Importar lista».`
             }
             <strong>${wishlistCount}/${event.participants.length}</strong> listas recibidas.
           </p>
@@ -318,7 +346,7 @@ function renderManage() {
         <div class="sheet" role="dialog" aria-labelledby="import-sheet-title">
           <div class="sheet-handle" aria-hidden="true"></div>
           <h3 id="import-sheet-title">Importar lista de deseos</h3>
-          <p class="muted">Pega el enlace que te ha enviado la persona.</p>
+          <p class="muted">Pega el enlace (o el mensaje entero) que te ha enviado la persona.</p>
           <textarea
             id="import-url-input"
             rows="4"
@@ -327,6 +355,7 @@ function renderManage() {
             autocorrect="off"
             spellcheck="false"
           ></textarea>
+          <button type="button" class="btn small secondary paste-btn" id="import-paste">📋 Pegar del portapapeles</button>
           <div class="sheet-actions">
             <button type="button" class="btn ghost" id="import-cancel">Cancelar</button>
             <button type="button" class="btn primary" id="import-submit">Importar</button>
@@ -351,7 +380,17 @@ function renderWishlist(token) {
     `;
   }
 
-  const saved = Boolean(data.wishlist?.trim());
+  const saved = Boolean(data.wishlist?.trim() || data.images.length);
+  const organizerPerson = event?.participants.find((p) => p.id === data.participantId);
+  const organizerBanner =
+    organizerPerson && saved
+      ? `
+        <div class="organizer-banner">
+          <p>Eres el organizador de <strong>${escapeHtml(event.name)}</strong> en este dispositivo.</p>
+          <button type="button" class="btn small primary" id="organizer-import">Importar esta lista a mi evento</button>
+        </div>
+      `
+      : '';
 
   return `
     <main class="page reveal-page">
@@ -360,22 +399,39 @@ function renderWishlist(token) {
         <p class="eyebrow">${escapeHtml(data.eventName)}</p>
         <h1>Hola, ${escapeHtml(data.participantName)}</h1>
         <p class="lead">Escribe o actualiza tu lista de deseos para que quien te toque sepa qué regalarte.</p>
+        ${organizerBanner}
         <form id="wishlist-form" class="stack">
           <label class="field">
             <span>Mi lista de deseos</span>
-            <textarea name="wishlist" rows="5" placeholder="Tallas, hobbies, libros, cosas que te gustan o que ya tienes…" required>${escapeHtml(data.wishlist || '')}</textarea>
+            <textarea name="wishlist" rows="5" placeholder="Tallas, hobbies, libros, cosas que te gustan o que ya tienes… Puedes pegar enlaces de tiendas.">${escapeHtml(data.wishlist || '')}</textarea>
           </label>
+          <div class="field">
+            <span>Fotos o enlaces (opcional, máx. ${MAX_IMAGES})</span>
+            <div id="image-editor">${renderImageGrid(data.images, { removable: true })}</div>
+            <div class="image-actions">
+              <label class="btn small secondary file-btn" id="add-photo-label">
+                📷 Añadir foto
+                <input type="file" id="add-photo" accept="image/*" multiple hidden />
+              </label>
+              <div class="inline-form image-url-form">
+                <input id="image-url" type="url" inputmode="url" placeholder="Enlace de imagen o producto" autocapitalize="off" autocorrect="off" spellcheck="false" />
+                <button type="button" class="btn small" id="add-image-url">Añadir</button>
+              </div>
+            </div>
+            <p class="muted small-note">Las fotos se reducen para que quepan en el enlace.</p>
+          </div>
           <button type="submit" class="btn primary">${saved ? 'Actualizar lista' : 'Guardar lista'}</button>
         </form>
         <div id="wishlist-result" class="${saved ? '' : 'hidden'}">
           <div class="wishlist-box success-box">
             <h2>¡Listo!</h2>
-            <p>Copia este enlace y envíaselo al organizador por WhatsApp. No hace falta escribir la lista otra vez.</p>
+            <p>Envía este enlace al organizador. No hace falta escribir la lista otra vez.</p>
           </div>
-          <div class="copy-url-row">
-            <input id="updated-link" readonly value="${escapeHtml(buildWishlistUrl(token))}" />
+          <div class="share-actions wide">
+            <button type="button" class="btn primary" id="share-updated-link">Enviar al organizador</button>
             <button type="button" class="btn" id="copy-updated-link">Copiar enlace</button>
           </div>
+          <input id="updated-link" type="hidden" value="${escapeHtml(buildWishlistUrl(token))}" />
         </div>
       </section>
     </main>
@@ -405,11 +461,12 @@ function renderReveal(token) {
         <p class="lead">Eres el amigo invisible de</p>
         <p class="reveal-name">${escapeHtml(data.receiverName)}</p>
         ${
-          data.wishlist
+          data.wishlist || data.images.length
             ? `
           <div class="wishlist-box">
             <h2>Su lista de deseos</h2>
-            <p>${escapeHtml(data.wishlist)}</p>
+            ${data.wishlist ? `<p class="wishlist-text">${linkify(escapeHtml(data.wishlist))}</p>` : ''}
+            ${renderImageGrid(data.images)}
           </div>
         `
             : '<p class="muted">Aún no ha compartido lista de deseos — toca investigar un poco.</p>'
@@ -441,18 +498,23 @@ function importWishlistFromUrl(url) {
     return false;
   }
 
-  const person = event.participants.find((p) => p.id === data.participantId);
+  return applyImportedWishlist(data);
+}
+
+function applyImportedWishlist(data) {
+  const person = event?.participants.find((p) => p.id === data.participantId);
   if (!person) {
     showToast(`No encontramos a ${data.participantName} en este evento`);
     return false;
   }
 
-  if (!data.wishlist?.trim()) {
+  if (!data.wishlist?.trim() && !data.images.length) {
     showToast('Ese enlace aún no tiene lista escrita');
     return false;
   }
 
   person.wishlist = data.wishlist.trim();
+  person.images = data.images;
   saveEvent(event);
   if (event.assignment) {
     showToast(`Lista de ${person.name} actualizada — reenvía los enlaces de revelación`);
@@ -524,20 +586,84 @@ function bindHomeEvents() {
 
 function bindWishlistEvents(initialToken) {
   let currentToken = initialToken;
+  const initial = decodeWishlistToken(initialToken);
+  if (!initial) return;
+  let images = [...initial.images];
+
+  const refreshImages = () => {
+    const editor = $('#image-editor');
+    if (editor) editor.innerHTML = renderImageGrid(images, { removable: true });
+    const full = images.length >= MAX_IMAGES;
+    $('#add-photo-label')?.classList.toggle('disabled', full);
+    const photoInput = $('#add-photo');
+    if (photoInput) photoInput.disabled = full;
+    const addUrl = $('#add-image-url');
+    if (addUrl) addUrl.disabled = full;
+  };
+  refreshImages();
+
+  $('#image-editor')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-remove-image]');
+    if (!btn) return;
+    images.splice(Number(btn.dataset.removeImage), 1);
+    refreshImages();
+  });
+
+  $('#add-photo')?.addEventListener('change', async (e) => {
+    const files = [...(e.target.files || [])];
+    e.target.value = '';
+    for (const file of files) {
+      if (images.length >= MAX_IMAGES) {
+        showToast(`Máximo ${MAX_IMAGES} fotos`);
+        break;
+      }
+      try {
+        images.push(await fileToThumbnail(file));
+      } catch {
+        showToast('No se pudo leer esa foto');
+      }
+    }
+    refreshImages();
+  });
+
+  const addUrl = () => {
+    const input = $('#image-url');
+    const value = input?.value.trim();
+    if (!value) return;
+    if (!/^https?:\/\/\S+$/i.test(value)) {
+      showToast('Pega un enlace que empiece por https://');
+      return;
+    }
+    if (images.length >= MAX_IMAGES) {
+      showToast(`Máximo ${MAX_IMAGES} fotos o enlaces`);
+      return;
+    }
+    images.push(value);
+    input.value = '';
+    refreshImages();
+  };
+  $('#add-image-url')?.addEventListener('click', addUrl);
+  $('#image-url')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addUrl();
+    }
+  });
 
   $('#wishlist-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
-    const data = decodeWishlistToken(currentToken);
-    if (!data) return;
-
     const wishlist = new FormData(e.target).get('wishlist').trim();
-    if (!wishlist) return;
+    if (!wishlist && !images.length) {
+      showToast('Escribe algo o añade una foto');
+      return;
+    }
 
     currentToken = encodeWishlistToken({
-      eventName: data.eventName,
-      participantId: data.participantId,
-      participantName: data.participantName,
+      eventName: initial.eventName,
+      participantId: initial.participantId,
+      participantName: initial.participantName,
       wishlist,
+      images,
     });
 
     const newUrl = buildWishlistUrl(currentToken);
@@ -547,18 +673,31 @@ function bindWishlistEvents(initialToken) {
     const linkInput = $('#updated-link');
     result?.classList.remove('hidden');
     if (linkInput) linkInput.value = newUrl;
+    result?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-    showToast('Lista guardada — envía el enlace al organizador');
+    showToast('Lista guardada — envíasela al organizador');
+  });
+
+  $('#share-updated-link')?.addEventListener('click', async () => {
+    const link = $('#updated-link')?.value;
+    if (!link) return;
+    await shareLink({
+      title: initial.eventName,
+      text: `🎁 Mi lista de deseos para «${initial.eventName}» (${initial.participantName}):`,
+      url: link,
+    });
   });
 
   $('#copy-updated-link')?.addEventListener('click', async () => {
     const link = $('#updated-link')?.value;
     if (!link) return;
-    try {
-      await navigator.clipboard.writeText(link);
-      showToast('Enlace copiado');
-    } catch {
-      showToast('No se pudo copiar — selecciónalo manualmente');
+    showToast((await copyText(link)) ? 'Enlace copiado' : 'No se pudo copiar');
+  });
+
+  $('#organizer-import')?.addEventListener('click', () => {
+    const data = decodeWishlistToken(currentToken);
+    if (data && applyImportedWishlist(data)) {
+      window.location.hash = '';
     }
   });
 }
@@ -607,6 +746,19 @@ function bindManageEvents() {
   $('#import-wishlist-btn')?.addEventListener('click', openImportSheet);
 
   $('#import-cancel')?.addEventListener('click', closeImportSheet);
+
+  $('#import-paste')?.addEventListener('click', async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) {
+        showToast('El portapapeles está vacío');
+        return;
+      }
+      if (importWishlistFromUrl(text)) closeImportSheet();
+    } catch {
+      showToast('No se pudo leer el portapapeles — pégalo a mano');
+    }
+  });
 
   $('#import-sheet')?.addEventListener('click', (e) => {
     if (e.target.id === 'import-sheet') closeImportSheet();
@@ -683,15 +835,21 @@ function bindManageEvents() {
   document.querySelectorAll('[data-copy-link]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const url = decodeURIComponent(btn.dataset.copyLink);
-      try {
-        await navigator.clipboard.writeText(url);
-        showToast('Enlace copiado');
-      } catch {
-        showToast('No se pudo copiar — selecciónalo manualmente');
-      }
+      showToast((await copyText(url)) ? 'Enlace copiado' : 'No se pudo copiar');
+    });
+  });
+
+  document.querySelectorAll('[data-share-link]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      shareLink({
+        title: event.name,
+        text: decodeURIComponent(btn.dataset.shareText),
+        url: decodeURIComponent(btn.dataset.shareLink),
+      });
     });
   });
 }
 
+installImageFallback();
 window.addEventListener('hashchange', render);
 render();
